@@ -9,8 +9,8 @@ internal sealed record LaunchCommandOptions
     [Option("game", Required = true, HelpText = GameHelpText)]
     public required string Game { get; init; }
     
-    [Option("dalamud-working-directory", Required = true, HelpText = DalamudWorkingDirectoryHelpText)]
-    public required string DalamudWorkingDirectory { get; init; }
+    [Option("dalamud-working-directory", HelpText = DalamudWorkingDirectoryHelpText)]
+    public string DalamudWorkingDirectory { get; init; }
 
     [Option("dalamud-configuration-path", HelpText = DalamudConfigurationPathHelpText)]
     public string DalamudConfigurationPath { get; init; }
@@ -88,6 +88,7 @@ internal sealed record LaunchCommandOptions
                                        "XIVLauncher");
         
         // Set default values
+        this.DalamudWorkingDirectory = Environment.CurrentDirectory;
         this.DalamudConfigurationPath = Path.Combine(xlRoot, "dalamudConfig.json");
         this.DalamudPluginDirectory = Path.Combine(xlRoot, "installedPlugins");
         this.DalamudDevPluginDirectory = Path.Combine(xlRoot, "devPlugins");
