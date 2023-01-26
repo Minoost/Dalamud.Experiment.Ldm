@@ -1,14 +1,6 @@
-﻿using System.Diagnostics;
-using System.IO.Pipes;
-using System.Runtime.InteropServices;
-using System.Security.AccessControl;
-using System.Security.Principal;
-using Windows.Win32;
-using Dalamud.Broker.Game;
+﻿using System.Runtime.InteropServices;
 using Dalamud.Broker.Ipc;
 using Dalamud.Broker.Win32;
-using GrpcDotNetNamedPipes;
-using Microsoft.Win32.SafeHandles;
 using Newtonsoft.Json;
 using Serilog;
 
@@ -96,14 +88,14 @@ internal static partial class LaunchCommand
     {
         var info = new DalamudStartInfo
         {
-            WorkingDirectory = Directory.GetCurrentDirectory(),
+            WorkingDirectory = options.DalamudWorkingDirectory,
             ConfigurationPath = options.DalamudConfigurationPath,
             PluginDirectory = options.DalamudPluginDirectory,
             DefaultPluginDirectory = options.DalamudDevPluginDirectory,
             AssetDirectory = options.DalamudAssetDirectory,
             BootShowConsole = false,
             CrashHandlerShow = true,
-            BootLogPath = @"D:\Projects\FFXIV\minoost\Dalamud.Experiment.Ldm\bin\Debug\dalamud_injector.log",
+            BootLogPath = Path.Combine(options.DalamudWorkingDirectory, "dalamud.injector.log"),
             BootDotnetOpenProcessHookMode = 0,
             BootWaitMessageBox = 1 | 2 | 4,
             BootVehEnabled = true,

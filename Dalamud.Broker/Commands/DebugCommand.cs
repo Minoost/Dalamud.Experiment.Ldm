@@ -7,7 +7,6 @@ using System.Text.Json;
 using Windows.Win32;
 using Windows.Win32.Foundation;
 using Windows.Win32.System.Threading;
-using Dalamud.Broker.Game;
 using Dalamud.Broker.Win32;
 
 namespace Dalamud.Broker.Commands;
