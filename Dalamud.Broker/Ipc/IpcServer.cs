@@ -11,19 +11,22 @@ internal sealed class IpcServer : IDisposable
 {
     public string Path { get; }
 
-    private NamedPipeServer mServer;
+    private readonly NamedPipeServer mServer;
 
     public ServiceBinderBase ServiceBinder => this.mServer.ServiceBinder;
 
-    public IpcServer(string path, IdentityReference clientId)
+    public IpcServer(string path, IdentityReference containerId)
     {
         var currentUser = new NTAccount(Environment.UserName);
 
-        // Create a security descriptor for the pipe
+        // Create a security descriptor for the pipe.
+        // - Host should have full control over the pipe.
+        // - Client (sandboxed process) should have read/write(modulo WriteDacl) access to it. 
         var pipeSecurity = new PipeSecurity();
-        pipeSecurity.AddAccessRule(new PipeAccessRule(currentUser, PipeAccessRights.ReadWrite,
+        pipeSecurity.AddAccessRule(new PipeAccessRule(currentUser, PipeAccessRights.FullControl,
                                                       AccessControlType.Allow));
-        pipeSecurity.AddAccessRule(new PipeAccessRule(clientId, PipeAccessRights.ReadWrite, AccessControlType.Allow));
+        pipeSecurity.AddAccessRule(new PipeAccessRule(containerId, PipeAccessRights.ReadWrite,
+                                                      AccessControlType.Allow));
 
         var serverOptions = new NamedPipeServerOptions
         {
@@ -31,6 +34,8 @@ internal sealed class IpcServer : IDisposable
         };
 
         this.Path = path;
+
+        // Create a server.
         this.mServer = new NamedPipeServer(path, serverOptions);
         this.mServer.Error += this.OnError;
     }
@@ -45,13 +50,9 @@ internal sealed class IpcServer : IDisposable
         this.mServer.Start();
     }
 
-    public void Stop()
-    {
-        this.mServer.Kill();
-    }
-
     public void Dispose()
     {
+        this.mServer.Error -= this.OnError;
         this.mServer.Dispose();
     }
 }

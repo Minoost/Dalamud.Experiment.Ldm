@@ -1,4 +1,7 @@
-﻿using System.Runtime.InteropServices;
+﻿using System.ComponentModel;
+using System.Runtime.InteropServices;
+using Windows.Win32;
+using Windows.Win32.System.Threading;
 using Dalamud.Broker.Ipc;
 using Dalamud.Broker.Win32;
 using Newtonsoft.Json;
@@ -13,7 +16,7 @@ internal static partial class LaunchCommand
         SafeHandle hProcess, [MarshalAs(UnmanagedType.LPWStr)] string gamePath,
         [MarshalAs(UnmanagedType.LPWStr)] string loadInfoJson);
 
-    public static async Task Run(LaunchCommandOptions options)
+    public static void Run(LaunchCommandOptions options)
     {
         ProcessHandle? gameProcess = default;
 
@@ -37,6 +40,12 @@ internal static partial class LaunchCommand
             Log.Information("Dalamud.Broker is now running at {Path} for the container {ContainerSid}",
                             ipcServer.Path,
                             container.ToIdentityReference());
+
+            var errc = PInvoke.ResumeThread(gameProcess.Thread);
+            if (errc == uint.MaxValue)
+            {
+                throw new Win32Exception();
+            }
         }
         catch (Exception ex)
         {
@@ -46,8 +55,8 @@ internal static partial class LaunchCommand
             // 
             // However, if this is a debug build then F that 💩 since leaving the game alive is much much easier
             // to track down what actually went wrong.
-            Log.Fatal(ex, "Something went wrong while launching the game");
-
+            Log.Verbose(ex, "Launch failed");
+            
 #if DEBUG
             // Let the debugger handle this
             throw;
@@ -66,6 +75,7 @@ internal static partial class LaunchCommand
         var processLaunchContext = new ProcessLaunchContext
         {
             ApplicationPath = options.Game,
+            CreationFlags = PROCESS_CREATION_FLAGS.CREATE_SUSPENDED,
         };
         var handle = ProcessLauncher.Start(processLaunchContext);
 
@@ -104,6 +114,6 @@ internal static partial class LaunchCommand
             Language = (ClientLanguage)options.DalamudClientLanguage,
         };
 
-        return JsonConvert.ToString(info);
+        return JsonConvert.SerializeObject(info);
     }
 }

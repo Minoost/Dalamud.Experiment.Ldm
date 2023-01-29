@@ -38,7 +38,7 @@ internal static class Program
         switch (options)
         {
             case LaunchCommandOptions opt:
-                await LaunchCommand.Run(opt);
+                LaunchCommand.Run(opt);
                 break;
             case SetupCommandOptions opt:
                 SetupCommand.Run(opt);
