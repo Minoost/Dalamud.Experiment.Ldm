@@ -301,7 +301,7 @@ internal class ConsoleWindow : Window, IDisposable
                 {
                     var line = this.LogEntries[i];
 
-                    if (!line.IsMultiline)
+                    if (!line.IsMultiline && !copy)
                         ImGui.Separator();
 
                     ImGui.PushStyleColor(ImGuiCol.Header, this.GetColorForLogEventLevel(line.Level));
@@ -331,6 +331,7 @@ internal class ConsoleWindow : Window, IDisposable
             }
 
             clipper.End();
+            clipper.Destroy();
         }
 
         ImGui.PopFont();

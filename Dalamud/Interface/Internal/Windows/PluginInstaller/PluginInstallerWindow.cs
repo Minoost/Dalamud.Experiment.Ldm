@@ -6,6 +6,7 @@ using System.Diagnostics.CodeAnalysis;
 using System.IO;
 using System.Linq;
 using System.Numerics;
+using System.Threading;
 using System.Threading.Tasks;
 
 using CheapLoc;
@@ -40,13 +41,16 @@ internal class PluginInstallerWindow : Window, IDisposable
 
     private readonly PluginImageCache imageCache;
     private readonly PluginCategoryManager categoryManager = new();
-    private readonly DalamudChangelogManager dalamudChangelogManager = new();
 
     private readonly List<int> openPluginCollapsibles = new();
 
     private readonly DateTime timeLoaded;
 
     private readonly object listLock = new();
+
+    private DalamudChangelogManager? dalamudChangelogManager;
+    private Task? dalamudChangelogRefreshTask;
+    private CancellationTokenSource? dalamudChangelogRefreshTaskCts;
 
     #region Image Tester State
 
@@ -82,7 +86,6 @@ internal class PluginInstallerWindow : Window, IDisposable
     private bool feedbackModalIncludeException = false;
     private PluginManifest? feedbackPlugin = null;
     private bool feedbackIsTesting = false;
-    private bool feedbackIsAnonymous = false;
 
     private int updatePluginCount = 0;
     private List<PluginUpdateStatus>? updatedPlugins;
@@ -93,6 +96,7 @@ internal class PluginInstallerWindow : Window, IDisposable
     private bool hasDevPlugins = false;
 
     private string searchText = string.Empty;
+    private bool isSearchTextPrefilled = false;
 
     private PluginSortKind sortKind = PluginSortKind.Alphabetical;
     private string filterText = Locs.SortBy_Alphabetical;
@@ -131,6 +135,8 @@ internal class PluginInstallerWindow : Window, IDisposable
             // For debugging
             if (pluginManager.PluginsReady)
                 this.OnInstalledPluginsChanged();
+
+            this.dalamudChangelogManager = new(pluginManager);
 
             pluginManager.OnAvailablePluginsChanged += this.OnAvailablePluginsChanged;
             pluginManager.OnInstalledPluginsChanged += this.OnInstalledPluginsChanged;
@@ -179,6 +185,8 @@ internal class PluginInstallerWindow : Window, IDisposable
     /// <inheritdoc/>
     public void Dispose()
     {
+        this.dalamudChangelogRefreshTaskCts?.Cancel();
+
         var pluginManager = Service<PluginManager>.GetNullable();
         if (pluginManager != null)
         {
@@ -193,9 +201,8 @@ internal class PluginInstallerWindow : Window, IDisposable
         var pluginManager = Service<PluginManager>.Get();
 
         _ = pluginManager.ReloadPluginMastersAsync();
-        _ = this.dalamudChangelogManager.ReloadChangelogAsync();
 
-        this.searchText = string.Empty;
+        if (!this.isSearchTextPrefilled) this.searchText = string.Empty;
         this.sortKind = PluginSortKind.Alphabetical;
         this.filterText = Locs.SortBy_Alphabetical;
 
@@ -211,6 +218,12 @@ internal class PluginInstallerWindow : Window, IDisposable
     public override void OnClose()
     {
         Service<DalamudConfiguration>.Get().QueueSave();
+
+        if (this.isSearchTextPrefilled)
+        {
+            this.isSearchTextPrefilled = false;
+            this.searchText = string.Empty;
+        }
     }
 
     /// <inheritdoc/>
@@ -240,6 +253,18 @@ internal class PluginInstallerWindow : Window, IDisposable
     /// <summary>
     /// Open the window on the plugin changelogs.
     /// </summary>
+    public void OpenInstalledPlugins()
+    {
+        // Installed group
+        this.categoryManager.CurrentGroupIdx = 1;
+        // All category
+        this.categoryManager.CurrentCategoryIdx = 0;
+        this.IsOpen = true;
+    }
+
+    /// <summary>
+    /// Open the window on the plugin changelogs.
+    /// </summary>
     public void OpenPluginChangelogs()
     {
         // Changelog group
@@ -247,6 +272,16 @@ internal class PluginInstallerWindow : Window, IDisposable
         // Plugins category
         this.categoryManager.CurrentCategoryIdx = 2;
         this.IsOpen = true;
+    }
+
+    /// <summary>
+    /// Sets the current search text and marks it as prefilled.
+    /// </summary>
+    /// <param name="text">The search term.</param>
+    public void SetSearchText(string text)
+    {
+        this.isSearchTextPrefilled = true;
+        this.searchText = text;
     }
 
     private void DrawProgressOverlay()
@@ -704,41 +739,21 @@ internal class PluginInstallerWindow : Window, IDisposable
 
             ImGui.Spacing();
 
-            if (ImGui.Checkbox(Locs.FeedbackModal_ContactAnonymous, ref this.feedbackIsAnonymous))
-            {
-                if (this.feedbackIsAnonymous)
-                    this.feedbackModalContact = string.Empty;
-            }
+            ImGui.InputText(Locs.FeedbackModal_ContactInformation, ref this.feedbackModalContact, 100);
 
-            if (this.feedbackIsAnonymous)
-            {
-                ImGui.BeginDisabled();
-                ImGui.InputText(Locs.FeedbackModal_ContactInformation, ref this.feedbackModalContact, 0);
-                ImGui.EndDisabled();
-                ImGui.PushStyleColor(ImGuiCol.Text, ImGuiColors.DalamudRed);
-                ImGui.Text(Locs.FeedbackModal_ContactAnonymousWarning);
-                ImGui.PopStyleColor();
-            }
-            else
-            {
-                ImGui.InputText(Locs.FeedbackModal_ContactInformation, ref this.feedbackModalContact, 100);
+            ImGui.SameLine();
 
-                ImGui.SameLine();
-
-                if (ImGui.Button(Locs.FeedbackModal_ContactInformationDiscordButton))
+            if (ImGui.Button(Locs.FeedbackModal_ContactInformationDiscordButton))
+            {
+                Process.Start(new ProcessStartInfo(Locs.FeedbackModal_ContactInformationDiscordUrl)
                 {
-                    Process.Start(new ProcessStartInfo(Locs.FeedbackModal_ContactInformationDiscordUrl)
-                    {
-                        UseShellExecute = true,
-                    });
-                }
-
-                ImGui.Text(Locs.FeedbackModal_ContactInformationHelp);
-
-                ImGui.PushStyleColor(ImGuiCol.Text, ImGuiColors.DalamudRed);
-                ImGui.Text(Locs.FeedbackModal_ContactInformationWarning);
-                ImGui.PopStyleColor();
+                    UseShellExecute = true,
+                });
             }
+
+            ImGui.Text(Locs.FeedbackModal_ContactInformationHelp);
+
+            ImGui.TextColored(ImGuiColors.DalamudRed, Locs.FeedbackModal_ContactInformationWarning);
 
             ImGui.Spacing();
 
@@ -754,7 +769,7 @@ internal class PluginInstallerWindow : Window, IDisposable
 
             if (ImGui.Button(Locs.ErrorModalButton_Ok, new Vector2(buttonWidth, 40)))
             {
-                if (!this.feedbackIsAnonymous && string.IsNullOrWhiteSpace(this.feedbackModalContact))
+                if (string.IsNullOrWhiteSpace(this.feedbackModalContact))
                 {
                     this.ShowErrorModal(Locs.FeedbackModal_ContactInformationRequired)
                         .ContinueWith(_ =>
@@ -820,7 +835,6 @@ internal class PluginInstallerWindow : Window, IDisposable
                 this.feedbackModalBody = string.Empty;
                 this.feedbackModalContact = Service<DalamudConfiguration>.Get().LastFeedbackContactDetails;
                 this.feedbackModalIncludeException = false;
-                this.feedbackIsAnonymous = false;
             }
             else
             {
@@ -837,33 +851,44 @@ internal class PluginInstallerWindow : Window, IDisposable
             return;
         }
 
-        var pluginChangelogs = this.pluginListInstalled
-                                   .Where(plugin => !this.IsManifestFiltered(plugin.Manifest)
-                                                    && !plugin.Manifest.Changelog.IsNullOrEmpty())
-                                   .Select(x =>
-                                   {
-                                       var changelog = new PluginChangelogEntry(x);
-                                       return (IChangelogEntry)changelog;
-                                   });
+        if (this.dalamudChangelogRefreshTask?.IsFaulted == true ||
+            this.dalamudChangelogRefreshTask?.IsCanceled == true)
+        {
+            ImGui.TextColored(ImGuiColors.DalamudGrey, Locs.TabBody_ChangelogError);
+            return;
+        }
+
+        if (this.dalamudChangelogManager?.Changelogs == null)
+        {
+            ImGui.TextColored(ImGuiColors.DalamudGrey, Locs.TabBody_LoadingPlugins);
+
+            if (this.dalamudChangelogManager != null &&
+                this.dalamudChangelogRefreshTask == null)
+            {
+                this.dalamudChangelogRefreshTaskCts = new CancellationTokenSource();
+                this.dalamudChangelogRefreshTask =
+                    Task.Run(this.dalamudChangelogManager.ReloadChangelogAsync, this.dalamudChangelogRefreshTaskCts.Token);
+            }
+
+            return;
+        }
 
         IEnumerable<IChangelogEntry> changelogs = null;
         if (displayDalamud && displayPlugins && this.dalamudChangelogManager.Changelogs != null)
         {
-            changelogs = pluginChangelogs
-                .Concat(this.dalamudChangelogManager.Changelogs.Select(
-                            x => new DalamudChangelogEntry(x)));
+            changelogs = this.dalamudChangelogManager.Changelogs;
         }
         else if (displayDalamud && this.dalamudChangelogManager.Changelogs != null)
         {
-            changelogs = this.dalamudChangelogManager.Changelogs.Select(
-                x => new DalamudChangelogEntry(x));
+            changelogs = this.dalamudChangelogManager.Changelogs.OfType<DalamudChangelogEntry>();
         }
         else if (displayPlugins)
         {
-            changelogs = pluginChangelogs;
+            changelogs = this.dalamudChangelogManager.Changelogs.OfType<PluginChangelogEntry>();
         }
 
-        var sortedChangelogs = changelogs?.OrderByDescending(x => x.Date).ToList();
+        var sortedChangelogs = changelogs?.Where(x => this.searchText.IsNullOrWhitespace() || x.Title.ToLowerInvariant().Contains(this.searchText.ToLowerInvariant()))
+                                                            .OrderByDescending(x => x.Date).ToList();
 
         if (sortedChangelogs == null || !sortedChangelogs.Any())
         {
@@ -1701,6 +1726,11 @@ internal class PluginInstallerWindow : Window, IDisposable
 
         ImGui.SameLine();
         ImGui.TextColored(ImGuiColors.DalamudGrey3, $" v{log.Version}");
+        if (log.Author != null)
+        {
+            ImGui.SameLine();
+            ImGui.TextColored(ImGuiColors.DalamudGrey3, Locs.PluginBody_AuthorWithoutDownloadCount(log.Author));
+        }
 
         cursor.Y += ImGui.GetTextLineHeightWithSpacing();
         ImGui.SetCursorPos(cursor);
@@ -2035,7 +2065,12 @@ internal class PluginInstallerWindow : Window, IDisposable
             ImGui.TextColored(ImGuiColors.DalamudGrey3, downloadText);
 
             var isThirdParty = manifest.IsThirdParty;
-            var canFeedback = !isThirdParty && !plugin.IsDev && plugin.Manifest.DalamudApiLevel == PluginManager.DalamudApiLevel && plugin.Manifest.AcceptsFeedback && availablePluginUpdate == default;
+            var canFeedback = !isThirdParty &&
+                              !plugin.IsDev &&
+                              !plugin.IsOrphaned &&
+                              plugin.Manifest.DalamudApiLevel == PluginManager.DalamudApiLevel &&
+                              plugin.Manifest.AcceptsFeedback &&
+                              availablePluginUpdate == default;
 
             // Installed from
             if (plugin.IsDev)
@@ -2217,7 +2252,8 @@ internal class PluginInstallerWindow : Window, IDisposable
         disabled = disabled || (plugin.IsOrphaned && !plugin.IsLoaded);
 
         // Disable everything if the plugin failed to load
-        disabled = disabled || plugin.State == PluginState.LoadError || plugin.State == PluginState.DependencyResolutionFailed;
+        // Now handled by the first case below
+        // disabled = disabled || plugin.State == PluginState.LoadError || plugin.State == PluginState.DependencyResolutionFailed;
 
         // Disable everything if we're working
         disabled = disabled || plugin.State == PluginState.Loading || plugin.State == PluginState.Unloading;
@@ -2228,7 +2264,7 @@ internal class PluginInstallerWindow : Window, IDisposable
 
         StyleModelV1.DalamudStandard.Push();
 
-        if (plugin.State == PluginState.UnloadError && !plugin.IsDev)
+        if (plugin.State is PluginState.UnloadError or PluginState.LoadError or PluginState.DependencyResolutionFailed && !plugin.IsDev)
         {
             ImGuiComponents.DisabledButton(FontAwesomeIcon.Frown);
 
@@ -2673,7 +2709,7 @@ internal class PluginInstallerWindow : Window, IDisposable
                                        manifest.InternalName.ToLowerInvariant().Contains(searchString) ||
                                        (!manifest.Author.IsNullOrEmpty() && manifest.Author.Equals(this.searchText, StringComparison.InvariantCultureIgnoreCase)) ||
                                        (!manifest.Punchline.IsNullOrEmpty() && manifest.Punchline.ToLowerInvariant().Contains(searchString)) ||
-                                       (manifest.Tags != null && manifest.Tags.Contains(searchString, StringComparer.InvariantCultureIgnoreCase)));
+                                       (manifest.Tags != null && manifest.Tags.Any(tag => tag.ToLowerInvariant().Contains(searchString))));
     }
 
     private (bool IsInstalled, LocalPlugin Plugin) IsManifestInstalled(PluginManifest? manifest)
@@ -2898,6 +2934,8 @@ internal class PluginInstallerWindow : Window, IDisposable
 
         public static string TabBody_ChangelogNone => Loc.Localize("InstallerNoChangelog", "None of your installed plugins have a changelog.");
 
+        public static string TabBody_ChangelogError => Loc.Localize("InstallerChangelogError", "Could not download changelogs.");
+
         #endregion
 
         #region Plugin title text
@@ -2970,8 +3008,6 @@ internal class PluginInstallerWindow : Window, IDisposable
 
         public static string PluginBody_Plugin3rdPartyRepo(string url) => Loc.Localize("InstallerPlugin3rdPartyRepo", "From custom plugin repository {0}").Format(url);
 
-        public static string PluginBody_AvailableDevPlugin => Loc.Localize("InstallerDevPlugin", " This plugin is available in one of your repos, please remove it from the devPlugins folder.");
-
         public static string PluginBody_Outdated => Loc.Localize("InstallerOutdatedPluginBody ", "This plugin is outdated and incompatible at the moment. Please wait for it to be updated by its author.");
 
         public static string PluginBody_Orphaned => Loc.Localize("InstallerOrphanedPluginBody ", "This plugin's source repository is no longer available. You may need to reinstall it from its repository, or re-add the repository.");
@@ -3029,7 +3065,7 @@ internal class PluginInstallerWindow : Window, IDisposable
 
         public static string PluginButtonToolTip_UpdateSingle(string version) => Loc.Localize("InstallerUpdateSingle", "Update to {0}").Format(version);
 
-        public static string PluginButtonToolTip_UnloadFailed => Loc.Localize("InstallerUnloadFailedTooltip", "Plugin unload failed, please restart your game and try again.");
+        public static string PluginButtonToolTip_UnloadFailed => Loc.Localize("InstallerLoadUnloadFailedTooltip", "Plugin load/unload failed, please restart your game and try again.");
 
         #endregion
 
@@ -3147,7 +3183,7 @@ internal class PluginInstallerWindow : Window, IDisposable
 
         public static string FeedbackModal_ContactInformationWarning => Loc.Localize("InstallerFeedbackContactInfoWarning", "Do not submit in-game character names.");
 
-        public static string FeedbackModal_ContactInformationRequired => Loc.Localize("InstallerFeedbackContactInfoRequired", "Contact information has not been provided. If you do not want to provide contact information, tick on \"{0}\" above.").Format(FeedbackModal_ContactAnonymous);
+        public static string FeedbackModal_ContactInformationRequired => Loc.Localize("InstallerFeedbackContactInfoRequired", "Contact information has not been provided. We require contact information to respond to questions, or to request additional information to troubleshoot problems.");
 
         public static string FeedbackModal_ContactInformationDiscordButton => Loc.Localize("ContactInformationDiscordButton", "Join Goat Place Discord");
 

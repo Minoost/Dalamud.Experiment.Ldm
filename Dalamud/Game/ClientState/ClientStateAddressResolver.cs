@@ -62,11 +62,6 @@ public sealed class ClientStateAddressResolver : BaseAddressResolver
     /// </summary>
     public IntPtr ConditionFlags { get; private set; }
 
-    /// <summary>
-    /// Gets the address of the Telepo instance.
-    /// </summary>
-    public IntPtr Telepo { get; private set; }
-
     // Functions
 
     /// <summary>
@@ -81,21 +76,12 @@ public sealed class ClientStateAddressResolver : BaseAddressResolver
     public IntPtr GamepadPoll { get; private set; }
 
     /// <summary>
-    /// Gets the address of the method which updates the list of available teleport locations.
-    /// </summary>
-    public IntPtr UpdateAetheryteList { get; private set; }
-
-    /// <summary>
     /// Scan for and setup any configured address pointers.
     /// </summary>
     /// <param name="sig">The signature scanner to facilitate setup.</param>
     protected override void Setup64Bit(SigScanner sig)
     {
-        // We don't need those anymore, but maybe someone else will - let's leave them here for good measure
-        // ViewportActorTable = sig.GetStaticAddressFromSig("48 8D 0D ?? ?? ?? ?? 85 ED", 0) + 0x148;
-        // SomeActorTableAccess = sig.ScanText("E8 ?? ?? ?? ?? 48 8D 55 A0 48 8D 8E ?? ?? ?? ??");
-
-        this.ObjectTable = sig.GetStaticAddressFromSig("48 8D 0D ?? ?? ?? ?? E8 ?? ?? ?? ?? 44 0F B6 83");
+        this.ObjectTable = sig.GetStaticAddressFromSig("48 8D 0D ?? ?? ?? ?? E8 ?? ?? ?? ?? 44 0F B6 83 ?? ?? ?? ?? C6 83 ?? ?? ?? ?? ??");
 
         this.BuddyList = sig.GetStaticAddressFromSig("48 8D 0D ?? ?? ?? ?? E8 ?? ?? ?? ?? 45 84 E4 75 1A F6 45 12 04");
 
@@ -119,9 +105,5 @@ public sealed class ClientStateAddressResolver : BaseAddressResolver
         this.TargetManager = sig.GetStaticAddressFromSig("48 8B 05 ?? ?? ?? ?? 48 8D 0D ?? ?? ?? ?? FF 50 ?? 48 85 DB");
 
         this.GamepadPoll = sig.ScanText("40 ?? 57 41 ?? 48 81 EC ?? ?? ?? ?? 44 0F ?? ?? ?? ?? ?? ?? ?? 48 8B");
-
-        this.Telepo = sig.GetStaticAddressFromSig("48 8D 0D ?? ?? ?? ?? 48 8B 12");
-
-        this.UpdateAetheryteList = sig.ScanText("E8 ?? ?? ?? ?? 48 89 46 68 4C 8D 45 50");
     }
 }

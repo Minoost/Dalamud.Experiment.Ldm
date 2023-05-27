@@ -417,13 +417,39 @@ internal class InterfaceManager : IDisposable, IServiceType
         if (this.Device == null)
             return null;
 
-        var dxgiDev = this.Device.QueryInterfaceOrNull<SharpDX.DXGI.Device>();
-        var dxgiAdapter = dxgiDev?.Adapter.QueryInterfaceOrNull<SharpDX.DXGI.Adapter4>();
-        if (dxgiAdapter == null)
-            return null;
+        try
+        {
+            var dxgiDev = this.Device.QueryInterfaceOrNull<SharpDX.DXGI.Device>();
+            var dxgiAdapter = dxgiDev?.Adapter.QueryInterfaceOrNull<SharpDX.DXGI.Adapter4>();
+            if (dxgiAdapter == null)
+                return null;
 
-        var memInfo = dxgiAdapter.QueryVideoMemoryInfo(0, SharpDX.DXGI.MemorySegmentGroup.Local);
-        return (memInfo.CurrentUsage, memInfo.CurrentReservation);
+            var memInfo = dxgiAdapter.QueryVideoMemoryInfo(0, SharpDX.DXGI.MemorySegmentGroup.Local);
+            return (memInfo.CurrentUsage, memInfo.CurrentReservation);
+        }
+        catch
+        {
+            // ignored
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Toggle Windows 11 immersive mode on the game window.
+    /// </summary>
+    /// <param name="enabled">Value.</param>
+    internal void SetImmersiveMode(bool enabled)
+    {
+        if (this.GameWindowHandle == nint.Zero)
+            return;
+
+        int value = enabled ? 1 : 0;
+        var hr = NativeFunctions.DwmSetWindowAttribute(
+            this.GameWindowHandle,
+            NativeFunctions.DWMWINDOWATTRIBUTE.DWMWA_USE_IMMERSIVE_DARK_MODE,
+            ref value,
+            sizeof(int));
     }
 
     private static void ShowFontError(string path)
@@ -580,12 +606,16 @@ internal class InterfaceManager : IDisposable, IServiceType
 
         this.RenderImGui();
 
-        foreach (var texture in this.deferredDisposeTextures)
+        if (this.deferredDisposeTextures.Count > 0)
         {
-            texture.RealDispose();
-        }
+            Log.Verbose("[IM] Disposing {Count} textures", this.deferredDisposeTextures.Count);
+            foreach (var texture in this.deferredDisposeTextures)
+            {
+                texture.RealDispose();
+            }
 
-        this.deferredDisposeTextures.Clear();
+            this.deferredDisposeTextures.Clear();
+        }
 
         return this.presentHook.Original(swapChain, syncInterval, presentFlags);
     }
@@ -707,7 +737,7 @@ internal class InterfaceManager : IDisposable, IServiceType
             // FontAwesome icon font
             Log.Verbose("[FONT] SetupFonts - FontAwesome icon font");
             {
-                var fontPathIcon = Path.Combine(dalamud.AssetDirectory.FullName, "UIRes", "FontAwesome5FreeSolid.otf");
+                var fontPathIcon = Path.Combine(dalamud.AssetDirectory.FullName, "UIRes", "FontAwesomeFreeSolid.otf");
                 if (!File.Exists(fontPathIcon))
                     ShowFontError(fontPathIcon);
 
@@ -963,6 +993,16 @@ internal class InterfaceManager : IDisposable, IServiceType
 
                 if (pid == Environment.ProcessId && User32.IsWindowVisible(this.GameWindowHandle))
                     break;
+            }
+
+            try
+            {
+                if (Service<DalamudConfiguration>.Get().WindowIsImmersive)
+                    this.SetImmersiveMode(true);
+            }
+            catch (Exception ex)
+            {
+                Log.Error(ex, "Could not enable immersive mode");
             }
 
             this.presentHook = Hook<PresentDelegate>.FromAddress(this.address.Present, this.PresentDetour);
